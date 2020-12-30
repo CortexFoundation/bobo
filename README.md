@@ -48,7 +48,10 @@ sig: the signature of user info in DATA below {...}
 
 ##### DATA
 ```
-{...}
+{
+ ...
+ ts: 1609310463 // timestamp secondes for signature expired check
+ }
 ```
 
 ### 2. Details
