@@ -39,7 +39,7 @@ POST
 ```
 ##### URL
 ```
-/user/0x2a2a0667f9cbf4055e48eaf0d5b40304b8822184?sig=0xee78eaa27526b412d0e970b85f47c96aa0aa67ed1c06f577ffe712a91284659a0a38529194a53891c84919369e09bf7e08d1655544cb044671461e210ddad1eb00
+/user/0x970e8128ab834e8eac17ab8e3812f010678cf791?sig=0x15ce17f60e6825a4d5556867c30d3bc823f9f2dd0d55aa845a816f4518a081ca5e2c9fea9ec552e861d015306c6c7c4132135e97b0e695e01c751c51e5e7075d01
 ```
 ##### Params
 ```
@@ -48,21 +48,18 @@ sig: the signature of user info in DATA below {...}
 
 ##### DATA
 ```
-{
- ...
- ts: 1609310463 // timestamp secondes for signature expired check
- }
+"{\"ts\":1609310997, \"name\":\"jo\"}"
 ```
 
 ### 2. Details
-To find user information by address (```0x2a2a0667f9cbf4055e48eaf0d5b40304b8822184```)
+To find user information by address (```0x970e8128ab834e8eac17ab8e3812f010678cf791```)
 ##### Method
 ```
 GET
 ```
 ##### URL
 ```
-/user/0x2a2a0667f9cbf4055e48eaf0d5b40304b8822184
+/user/0x970e8128ab834e8eac17ab8e3812f010678cf791
 ```
 ##### Params
 ```
