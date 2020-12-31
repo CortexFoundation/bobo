@@ -47,6 +47,8 @@ sig: the signature of user info in DATA below {...}
 ```
 
 ##### DATA
+
+ts : current timestamp used for signature checking
 ```
 "{\"ts\":1609310997, \"name\":\"jo\"}"
 ```
