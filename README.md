@@ -92,18 +92,37 @@ sig: the signature of user info in DATA below {...}
 
 ts : current timestamp used for signature checking
 ```
-"{\"ts\":1609310997, \"addr\":\"0x2a2a0667f9cbf4055e48eaf0d5b40304b8822184\"}"
+"{\"ts\":1609310997, \"addr\":\"0x970e8128ab834e8eac17ab8e3812f010678cf791\"}"
 ```
 
-### 2. Favored
-To find user information by address (```0x970e8128ab834e8eac17ab8e3812f010678cf791```)
+### 2. Favor
+all the favor works of (```0x970e8128ab834e8eac17ab8e3812f010678cf791```)
 ##### Method
 ```
 GET
 ```
 ##### URL
 ```
-/favored/0x970e8128ab834e8eac17ab8e3812f010678cf791
+/favor/0x970e8128ab834e8eac17ab8e3812f010678cf791
+```
+##### Params
+```
+NULL
+```
+
+##### DATA
+```
+NULL
+```
+### 3. Favored
+To find who favored this work (```0x970e8128ab834e8eac17ab8e3812f010678cf791```)
+##### Method
+```
+GET
+```
+##### URL
+```
+/favor/0x970e8128ab834e8eac17ab8e3812f010678cf791
 ```
 ##### Params
 ```
