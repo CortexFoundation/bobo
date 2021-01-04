@@ -122,7 +122,7 @@ GET
 ```
 ##### URL
 ```
-/favor/0x970e8128ab834e8eac17ab8e3812f010678cf791
+/favored/0x970e8128ab834e8eac17ab8e3812f010678cf791
 ```
 ##### Params
 ```
@@ -132,6 +132,27 @@ NULL
 ##### DATA
 ```
 NULL
+```
+### 4. Remove Favor
+Remove Favor of the work
+##### Method
+```
+DELETE
+```
+##### URL
+```
+/favor/0x970e8128ab834e8eac17ab8e3812f010678cf791?sig=0xab133a9294a829e9023264cd146a8ab56d9ff8ead591cc7d218d5cbd1513f8a73fe7c6666b86f8aaffef8ba6f3cef4bfaebe4a7502df052803965440da7baa7300
+```
+##### Params
+```
+sig: the signature of user info in DATA below {...}
+```
+
+##### DATA
+
+ts : current timestamp used for signature checking
+```
+"{\"ts\":1609310997, \"addr\":\"0x970e8128ab834e8eac17ab8e3812f010678cf791\"}"
 ```
 
 test domain http://share.cortexlabs.ai:8081
