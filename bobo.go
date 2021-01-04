@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"hash"
 	"io/ioutil"
+	"log"
 	"math/big"
 	"net/http"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/CortexFoundation/CortexTheseus/common/math"
 	"github.com/CortexFoundation/CortexTheseus/crypto"
 	"github.com/CortexFoundation/CortexTheseus/crypto/secp256k1"
+	//"github.com/CortexFoundation/CortexTheseus/log"
 
 	"golang.org/x/crypto/sha3"
 
@@ -55,7 +57,7 @@ func main() {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	fmt.Printf("%v, %v, %v\n", r.URL, r.Method, r.URL.Path)
+	log.Printf("%v %v", r.URL, r.Method)
 	res := "OK"
 	uri := strings.ToLower(r.URL.Path)
 	q := r.URL.Query()
@@ -67,13 +69,17 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			//addr := u[len(u)-1]
 			switch method {
 			case "user":
-				res = Get(uri)
+				res = UserDetails(uri)
 			case "favor":
-				res = Prefix(uri)
-			case "follower":
-				//TODO
+				res = Favor(uri)
+			case "favored":
+				addr := u[len(u)-1]
+				res = Favored(FV + addr)
 			case "follow":
-				//TODO
+				res = Follow(uri)
+			case "followed":
+				addr := u[len(u)-1]
+				res = Followed(FL + addr)
 			default:
 			}
 		}
@@ -81,8 +87,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		if reqBody, err := ioutil.ReadAll(r.Body); err == nil {
 			var body Body
 			if err := json.Unmarshal(reqBody, &body); err != nil {
-				fmt.Println("Not a json:", err)
-				//return err
+				log.Printf("%v", err)
+				//return errors.New("Invalid json")
+				return
 			}
 
 			to := strings.ToLower(body.Addr)
@@ -92,7 +99,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				//return errors.New("Signature expired")
 			}
 
-			if time.Now().Unix()+int64(15) < timestamp {
+			if time.Now().Unix()+int64(30) < timestamp {
 				//return errors.New("Signature disallowed future")
 			}
 			//TODO to address fmt check
@@ -125,8 +132,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		if reqBody, err := ioutil.ReadAll(r.Body); err == nil {
 			var body Body
 			if err := json.Unmarshal(reqBody, &body); err != nil {
-				fmt.Println("Not a json:", err)
-				//return err
+				log.Printf("%v", err)
+				//return errors.New("Invalid json")
+				return
 			}
 			to := strings.ToLower(body.Addr)
 			timestamp := body.Timestamp
@@ -143,7 +151,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				method := u[len(u)-2]
 				addr := u[len(u)-1]
 
-				fmt.Println("method:" + method + ", addr:" + addr)
+				log.Printf("%v %v", method, addr)
 				switch method {
 				case "favor":
 					if err := Del(uri+FV+to, string(reqBody), addr, q.Get("sig")); err != nil {
@@ -164,14 +172,22 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, res)
 }
 
-func Get(k string) string {
+func parseUri(uri string) (string, string) {
+	u := strings.Split(uri, "/")
+	method := u[len(u)-2]
+	addr := u[len(u)-1]
+	return method, addr
+}
+
+func UserDetails(k string) string {
 	return get(k)
 }
 
 func Set(k, v, addr, sig string) error {
 	//fmt.Printf("%v\n", []byte(v))
 	sig_, _ := SignHex(v, testpri)
-	fmt.Printf("signature %s\n", hexutil.Encode(sig_[:]))
+	//fmt.Printf("signature %s\n", hexutil.Encode(sig_[:]))
+	log.Printf("signature : %s", hexutil.Encode(sig_[:]))
 
 	m := Keccak256([]byte(v))
 	s := hexutil.MustDecode(sig)
@@ -188,16 +204,17 @@ func Set(k, v, addr, sig string) error {
 	pubKey, _ := UnmarshalPubkey(recoveredPub)
 	recoveredAddr := PubkeyToAddress(*pubKey)
 	if common.HexToAddress(addr) != recoveredAddr {
-		fmt.Printf("Address mismatch: want: %v have: %v\n", addr, recoveredAddr.Hex())
+		log.Printf("Address mismatch: want: %v have: %v\n", addr, recoveredAddr.Hex())
+
 		return errors.New("Key mismatched")
 	}
 
 	if !VerifySignature(recoveredPub, m, s[:len(s)-1]) {
-		fmt.Println("Signature unpassed")
+		//fmt.Println("Signature unpassed")
 		return errors.New("Signature failed")
 	}
 
-	fmt.Println("signature passed")
+	//fmt.Println("signature passed")
 	return set(k, v)
 }
 
@@ -206,8 +223,33 @@ func Del(k, v, addr, sig string) error {
 	return del(k)
 }
 
-func Prefix(k string) string {
+func Favor(k string) string {
 	res, _ := json.Marshal(prefix(k))
+	return string(res)
+}
+
+func Follow(k string) string {
+	res, _ := json.Marshal(prefix(k))
+	return string(res)
+}
+
+func Followed(k string) string {
+	return ""
+}
+
+func Favored(k string) string {
+	//fmt.Println(k)
+	favs := suffix(k)
+
+	var tmp []string
+	for _, f := range favs {
+		//fmt.Println(f)
+		vs := strings.Split(string(f), FV)
+		fs := strings.Split(vs[0], "/")
+		tmp = append(tmp, fs[len(fs)-1])
+
+	}
+	res, _ := json.Marshal(tmp)
 	return string(res)
 }
 
@@ -285,9 +327,9 @@ func scan() (res []string) {
 		defer it.Close()
 		for it.Rewind(); it.Valid(); it.Next() {
 			item := it.Item()
-			k := item.Key()
+			//			k := item.Key()
 			err := item.Value(func(v []byte) error {
-				fmt.Printf("key=%s, value=%s\n", k, v)
+				//				fmt.Printf("key=%s, value=%s\n", k, v)
 				res = append(res, string(v))
 				return nil
 			})
@@ -309,8 +351,10 @@ func suffix(suf string) (res []string) {
 		for it.Rewind(); it.Valid(); it.Next() {
 			item := it.Item()
 			k := item.Key()
-			fmt.Printf("key=%s\n", k)
 			if strings.HasSuffix(string(k), suf) {
+				//vs := strings.Split(string(k), "_")
+				//favs := strings.Split(vs[0], "/")
+				//res = append(res, favs[len(favs)-1])
 				res = append(res, string(k))
 			}
 		}
