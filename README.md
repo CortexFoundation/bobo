@@ -85,7 +85,7 @@ POST
 ```
 ##### Params
 ```
-sig: the signature of user info in DATA below {...}
+sig: the signature of DATA below {...}
 ```
 
 ##### DATA
@@ -145,7 +145,7 @@ DELETE
 ```
 ##### Params
 ```
-sig: the signature of user info in DATA below {...}
+sig: the signature of DATA below {...}
 ```
 
 ##### DATA
