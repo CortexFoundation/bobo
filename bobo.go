@@ -42,9 +42,11 @@ var (
 	testpri       = "289c2857d4598e37fb9647507e47a309d6133539bf21a8b9cb6df88fd5232032"
 )
 
-const DigestLength = 32
-const FV = "_fv_"
-const FL = "_fl_"
+const (
+	DigestLength = 32
+	_FV_         = "_fv_"
+	_FL_         = "_fl_"
+)
 
 func main() {
 	if bg, err := badger.Open(badger.DefaultOptions(".badger")); err == nil {
@@ -56,194 +58,163 @@ func main() {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	log.Printf("%v %v", r.URL, r.Method)
+	log.Printf("%v %v", r.Method, r.URL)
 	res := "OK"
+
 	uri := strings.ToLower(r.URL.Path)
+	u := strings.Split(uri, "/")
+	if len(u) < 2 {
+		fmt.Fprintf(w, "Invalid URL")
+		return
+	}
+
+	addr, method := u[len(u)-1], u[len(u)-2]
+	if !common.IsHexAddress(addr) {
+		fmt.Fprintf(w, "Invalid infohash format")
+		return
+	}
 	q := r.URL.Query()
 	switch r.Method {
-	case "GET":
-		u := strings.Split(uri, "/")
-		if len(u) > 1 {
-			method := u[len(u)-2]
-			//addr := u[len(u)-1]
+	case http.MethodGet:
+		switch method {
+		case "user":
+			res = UserDetails(uri)
+		case "favor":
+			res = FavorList(uri)
+		case "favored":
+			res = FavoredList(addr)
+		case "follow":
+			res = FollowList(uri)
+		case "followed":
+			res = FollowedList(addr)
+		default:
+			res = "Method not found"
+		}
+	case http.MethodPost:
+		if reqBody, err := ioutil.ReadAll(r.Body); err == nil {
+			var body Body
+			if err := json.Unmarshal(reqBody, &body); err != nil {
+				log.Printf("%v", err)
+				res = "Invalid json"
+				break
+			}
+
+			to := strings.ToLower(body.Addr)
+			if len(to) > 0 && !common.IsHexAddress(to) {
+				res = "Invalid addr format"
+				break
+			}
+
+			if !Verify(string(reqBody), addr, q.Get("sig"), body.Timestamp) {
+				res = "Invalid signature"
+				break
+			}
+
 			switch method {
 			case "user":
-				res = UserDetails(uri)
+				if err := UserCreate(uri, string(reqBody)); err != nil {
+					res = fmt.Sprintf("%v", err)
+				}
 			case "favor":
-				res = FavorList(uri)
-			case "favored":
-				addr := u[len(u)-1]
-				res = FavoredList(FV + addr)
+				if err := Favor(uri, to); err != nil {
+					res = fmt.Sprintf("%v", err)
+				}
 			case "follow":
-				res = FollowList(uri)
-			case "followed":
-				addr := u[len(u)-1]
-				res = FollowedList(FL + addr)
+				if err := Follow(uri, to); err != nil {
+					res = fmt.Sprintf("%v", err)
+				}
 			default:
 				res = "Method not found"
 			}
 		}
-	case "POST":
+	case http.MethodDelete:
 		if reqBody, err := ioutil.ReadAll(r.Body); err == nil {
 			var body Body
 			if err := json.Unmarshal(reqBody, &body); err != nil {
 				log.Printf("%v", err)
-				//return errors.New("Invalid json")
-				res = "Invalid json"
+				res = fmt.Sprintf("%v", err)
 				break
 			}
 
 			to := strings.ToLower(body.Addr)
-			//if !common.IsHexAddress(to) {
-			//	res = "Invalid addr format"
-			//	break
-			//}
-			timestamp := body.Timestamp
-
-			u := strings.Split(uri, "/")
-			if len(u) > 1 {
-				method := u[len(u)-2]
-				addr := u[len(u)-1]
-				if !common.IsHexAddress(addr) {
-					res = "Invalid infohash format"
-					break
-				}
-
-				if !Verify(string(reqBody), addr, q.Get("sig"), timestamp) {
-					res = "Invalid signature"
-					break
-				}
-
-				//fmt.Println("method:" + method + ", addr:" + addr)
-				switch method {
-				case "user":
-					if err := Create(uri, string(reqBody)); err != nil {
-						res = fmt.Sprintf("%v", err)
-					}
-				case "favor":
-					if err := Favor(uri, to); err != nil {
-						res = "ERROR" //fmt.Sprintf("%v", err)
-					}
-				case "follow":
-					if err := Follow(uri, to); err != nil {
-						res = "ERROR" //fmt.Sprintf("%v", err)
-					}
-					//TODO
-				default:
-					res = "Method not found"
-				}
-			}
-		}
-	case "DELETE":
-		if reqBody, err := ioutil.ReadAll(r.Body); err == nil {
-			var body Body
-			if err := json.Unmarshal(reqBody, &body); err != nil {
-				log.Printf("%v", err)
-				//return errors.New("Invalid json")
-				res = "Invalid json"
+			if len(to) > 0 && !common.IsHexAddress(to) {
+				res = "Invalid addr format"
 				break
 			}
-			to := strings.ToLower(body.Addr)
-			timestamp := body.Timestamp
 
-			//if !common.IsHexAddress(to) {
-			//	res = "Invalid addr format"
-			//	break
-			//}
+			if !Verify(string(reqBody), addr, q.Get("sig"), body.Timestamp) {
+				res = "Invalid signature"
+				break
+			}
 
-			u := strings.Split(uri, "/")
-			if len(u) > 1 {
-				method := u[len(u)-2]
-				addr := u[len(u)-1]
-				if !common.IsHexAddress(addr) {
-					res = "Invalid addr format"
-					break
+			switch method {
+			case "favor":
+				if err := Unfavor(uri, to); err != nil {
+					res = fmt.Sprintf("%v", err)
 				}
-
-				if !Verify(string(reqBody), addr, q.Get("sig"), timestamp) {
-					res = "Invalid signature"
-					break
-
+			case "follow":
+				if err := Unfollow(uri, to); err != nil {
+					res = fmt.Sprintf("%v", err)
 				}
-
-				log.Printf("%v %v", method, addr)
-				switch method {
-				case "favor":
-					if err := Del(uri + FV + to); err != nil {
-						//res = "ERROR" //fmt.Sprintf("%v", err)
-						res = fmt.Sprintf("%v", err)
-					}
-				case "follow":
-					if err := Del(uri + FL + to); err != nil {
-						//res = "ERROR" //fmt.Sprintf("%v", err)
-						res = fmt.Sprintf("%v", err)
-					}
-				default:
-					res = "Method not found"
-				}
+			default:
+				res = "Method not found"
 			}
 		}
 	default:
-		res = "Method not found"
+		res = "INVALID REQUEST TYPE"
 	}
 	fmt.Fprintf(w, res)
 }
 
-func Create(uri, v string) error {
-	return Set(uri, v)
+func Unfavor(uri, to string) error {
+	return del(uri + _FV_ + to)
+}
+
+func Unfollow(uri, to string) error {
+	return del(uri + _FL_ + to)
+}
+
+func UserCreate(uri, v string) error {
+	return set(uri, v)
 }
 
 func Favor(uri, to string) error {
-	return Set(uri+FV+to, to)
+	return set(uri+_FV_+to, to)
 }
 
 func Follow(uri, to string) error {
-	return Set(uri+FL+to, to)
-}
-
-func parseUri(uri string) (string, string) {
-	u := strings.Split(uri, "/")
-	method := u[len(u)-2]
-	addr := u[len(u)-1]
-	return method, addr
+	return set(uri+_FL_+to, to)
 }
 
 func UserDetails(k string) string {
 	return get(k)
 }
 
-func Set(k, v string) error {
-	return set(k, v)
-}
-
-func Del(k string) error {
-	return del(k)
-}
-
 func Verify(msg, addr, sig string, timestamp int64) bool {
 	if time.Now().Unix()-int64(30) > timestamp {
 		//return errors.New("Signature expired")
+		//TODO
+		//return false
 	}
 
 	if time.Now().Unix()+int64(15) < timestamp {
 		//return errors.New("Signature disallowed future")
+		//TODO
+		//return false
 	}
-	//fmt.Printf("%v\n", []byte(v))
+
 	sig_, _ := SignHex(msg, testpri)
-	//fmt.Printf("signature %s\n", hexutil.Encode(sig_[:]))
-	log.Printf("signature : %s", hexutil.Encode(sig_[:]))
+	log.Printf("[signature] : %s", hexutil.Encode(sig_[:]))
 
 	m := Keccak256([]byte(msg))
 	s := hexutil.MustDecode(sig)
 
 	if len(m) == 0 || len(s) == 0 {
-		//return errors.New("Hex decode failed")
 		return false
 	}
 
 	recoveredPub, err := Ecrecover(m, s)
 	if err != nil {
-		//return errors.New("Ecrecover failed")
 		return false
 	}
 
@@ -251,14 +222,10 @@ func Verify(msg, addr, sig string, timestamp int64) bool {
 	recoveredAddr := PubkeyToAddress(*pubKey)
 	if common.HexToAddress(addr) != recoveredAddr {
 		log.Printf("Address mismatch: want: %v have: %v\n", addr, recoveredAddr.Hex())
-
-		//return errors.New("Key mismatched")
 		return false
 	}
 
 	if !VerifySignature(recoveredPub, m, s[:len(s)-1]) {
-		//fmt.Println("Signature unpassed")
-		//return errors.New("Signature failed")
 		return false
 	}
 	return true
@@ -275,13 +242,16 @@ func FollowList(k string) string {
 }
 
 func FollowedList(k string) string {
+	k = _FL_ + k
 	followers := suffix(k)
 
 	var tmp []string
 	for _, f := range followers {
-		vs := strings.Split(string(f), FL)
+		vs := strings.Split(string(f), _FL_)
 		fs := strings.Split(vs[0], "/")
-		tmp = append(tmp, fs[len(fs)-1])
+		if len(fs) > 0 {
+			tmp = append(tmp, fs[len(fs)-1])
+		}
 
 	}
 	res, _ := json.Marshal(tmp)
@@ -289,15 +259,16 @@ func FollowedList(k string) string {
 }
 
 func FavoredList(k string) string {
+	k = _FV_ + k
 	favs := suffix(k)
 
 	var tmp []string
 	for _, f := range favs {
-		//fmt.Println(f)
-		vs := strings.Split(string(f), FV)
+		vs := strings.Split(string(f), _FV_)
 		fs := strings.Split(vs[0], "/")
-		tmp = append(tmp, fs[len(fs)-1])
-
+		if len(fs) > 0 {
+			tmp = append(tmp, fs[len(fs)-1])
+		}
 	}
 	res, _ := json.Marshal(tmp)
 	return string(res)
@@ -412,6 +383,16 @@ func suffix(suf string) (res []string) {
 	})
 	return
 }
+
+func sequence(key string) {
+	seq, _ := db.GetSequence([]byte(key), 1000)
+	defer seq.Release()
+	//for {
+	num, _ := seq.Next()
+	log.Printf("seq %v", num)
+	//}
+}
+
 func VerifySignature(pubkey, hash, signature []byte) bool {
 	return secp256k1.VerifySignature(pubkey, hash, signature)
 }
