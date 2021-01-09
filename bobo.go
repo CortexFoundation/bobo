@@ -446,9 +446,6 @@ func suffix(suf string) (res []string) {
 			item := it.Item()
 			k := item.Key()
 			if strings.HasSuffix(string(k), suf) {
-				//vs := strings.Split(string(k), "_")
-				//favs := strings.Split(vs[0], "/")
-				//res = append(res, favs[len(favs)-1])
 				res = append(res, string(k))
 			}
 		}
@@ -460,10 +457,8 @@ func suffix(suf string) (res []string) {
 func sequence(key string) {
 	seq, _ := db.GetSequence([]byte(key), 1000)
 	defer seq.Release()
-	//for {
 	num, _ := seq.Next()
 	log.Printf("seq %v", num)
-	//}
 }
 
 func VerifySignature(pubkey, hash, signature []byte) bool {
@@ -538,7 +533,6 @@ func zeroBytes(bytes []byte) {
 func SignHex(msg string, pri string) (sig []byte, err error) {
 	k0, _ := HexToECDSA(pri)
 	msg0 := Keccak256([]byte(msg))
-	//fmt.Println("msg0 " + hexutil.Encode(msg0[:]))
 	return Sign(msg0, k0)
 }
 
