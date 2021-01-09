@@ -138,8 +138,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				}
 			case "work":
 				status := "pending"
-				if len(q.Get("status")) > 0 {
-					status = q.Get("status")
+				if len(q.Get("st")) > 0 {
+					status = q.Get("st")
 				}
 				if err := UpdateWork(uri, status); err != nil {
 					res = fmt.Sprintf("%v", err)
@@ -212,7 +212,8 @@ func Pub(uri, to string) error {
 }
 
 func UpdateWork(uri, status string) error {
-	return setTTL(uri+_ST_, status, 24*time.Hour)
+	go setTTL(uri+_ST_, status, 24*time.Hour)
+	return nil
 }
 
 func UserDetails(k string) string {
@@ -302,6 +303,7 @@ func MsgList(k string) string {
 		}
 	}
 
+	//TODO delete after fetching
 	fvs := prefix("/favor/" + k)
 	for _, fv := range fvs {
 		log.Println("favor : " + fv)
@@ -311,6 +313,8 @@ func MsgList(k string) string {
 			tmp = append(tmp, "Work "+fv+" is "+m)
 		}
 	}
+
+	//TODO delete after fetching
 	res, _ := json.Marshal(tmp)
 	return string(res)
 }
