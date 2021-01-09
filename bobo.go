@@ -34,6 +34,7 @@ type KeccakState interface {
 type Body struct {
 	Timestamp int64  `json:"ts"`
 	Addr      string `json:"addr"`
+	//Text      string `json:"txt"`
 }
 
 var (
@@ -46,6 +47,7 @@ const (
 	DigestLength = 32
 	_FV_         = "_fv_"
 	_FL_         = "_fl_"
+	_PB_         = "_pb_"
 )
 
 func main() {
@@ -87,6 +89,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			res = FollowList(uri)
 		case "followed":
 			res = FollowedList(addr)
+		case "msg":
+			res = MsgList(addr)
 		default:
 			res = "Method not found"
 		}
@@ -123,6 +127,12 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				if err := Follow(uri, to); err != nil {
 					res = fmt.Sprintf("%v", err)
 				}
+			case "artist":
+				if err := Pub(uri, to); err != nil {
+					res = fmt.Sprintf("%v", err)
+				}
+			case "work":
+				//TODO
 			default:
 				res = "Method not found"
 			}
@@ -184,6 +194,10 @@ func Favor(uri, to string) error {
 
 func Follow(uri, to string) error {
 	return set(uri+_FL_+to, to)
+}
+
+func Pub(uri, to string) error {
+	return setTTL(uri+_PB_+to, to, 24*time.Hour)
 }
 
 func UserDetails(k string) string {
@@ -258,6 +272,22 @@ func FollowedList(k string) string {
 	return string(res)
 }
 
+func MsgList(k string) string {
+	fls := prefix("/follow/" + k)
+	var tmp []string
+	for _, fl := range fls {
+		log.Println("follow : " + fl)
+		msgs := prefix("/artist/" + fl)
+		for _, m := range msgs {
+			log.Println("artist : [" + fl + "] has published a new work [" + m + "]")
+			tmp = append(tmp, "Artist "+fl+" published work "+m)
+		}
+	}
+	//TODO work msg
+	res, _ := json.Marshal(tmp)
+	return string(res)
+}
+
 func FavoredList(k string) string {
 	k = _FV_ + k
 	favs := suffix(k)
@@ -301,6 +331,17 @@ func set(k, v string) (err error) {
 	}
 	err = db.Update(func(txn *badger.Txn) error {
 		return txn.Set([]byte(k), []byte(v))
+	})
+	return
+}
+
+func setTTL(k, v string, expire time.Duration) (err error) {
+	if len(k) == 0 || len(v) == 0 || expire == 0 {
+		return
+	}
+	err = db.Update(func(txn *badger.Txn) error {
+		e := badger.NewEntry([]byte(k), []byte(v)).WithTTL(expire)
+		return txn.SetEntry(e)
 	})
 	return
 }
