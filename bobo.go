@@ -48,6 +48,7 @@ const (
 	_FV_         = "_fv_"
 	_FL_         = "_fl_"
 	_PB_         = "_pb_"
+	_ST_         = "_st_"
 )
 
 func main() {
@@ -97,21 +98,25 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		if reqBody, err := ioutil.ReadAll(r.Body); err == nil {
 			var body Body
-			if err := json.Unmarshal(reqBody, &body); err != nil {
-				log.Printf("%v", err)
-				res = "Invalid json"
-				break
-			}
+			var to string
+			if method != "work" {
+				if len(reqBody) > 0 {
+					if err := json.Unmarshal(reqBody, &body); err != nil {
+						log.Printf("%v", err)
+						res = "Invalid json"
+						break
+					}
+				}
+				to = strings.ToLower(body.Addr)
+				if len(to) > 0 && !common.IsHexAddress(to) {
+					res = "Invalid addr format"
+					break
+				}
 
-			to := strings.ToLower(body.Addr)
-			if len(to) > 0 && !common.IsHexAddress(to) {
-				res = "Invalid addr format"
-				break
-			}
-
-			if !Verify(string(reqBody), addr, q.Get("sig"), body.Timestamp) {
-				res = "Invalid signature"
-				break
+				if !Verify(string(reqBody), addr, q.Get("sig"), body.Timestamp) {
+					res = "Invalid signature"
+					break
+				}
 			}
 
 			switch method {
@@ -132,7 +137,13 @@ func handler(w http.ResponseWriter, r *http.Request) {
 					res = fmt.Sprintf("%v", err)
 				}
 			case "work":
-				//TODO
+				status := "pending"
+				if len(q.Get("status")) > 0 {
+					status = q.Get("status")
+				}
+				if err := UpdateWork(uri, status); err != nil {
+					res = fmt.Sprintf("%v", err)
+				}
 			default:
 				res = "Method not found"
 			}
@@ -200,11 +211,18 @@ func Pub(uri, to string) error {
 	return setTTL(uri+_PB_+to, to, 24*time.Hour)
 }
 
+func UpdateWork(uri, status string) error {
+	return setTTL(uri+_ST_, status, 24*time.Hour)
+}
+
 func UserDetails(k string) string {
 	return get(k)
 }
 
 func Verify(msg, addr, sig string, timestamp int64) bool {
+	if len(msg) == 0 || len(addr) == 0 || len(sig) == 0 {
+		return false
+	}
 	if time.Now().Unix()-int64(30) > timestamp {
 		//return errors.New("Signature expired")
 		//TODO
@@ -283,7 +301,16 @@ func MsgList(k string) string {
 			tmp = append(tmp, "Artist "+fl+" published work "+m)
 		}
 	}
-	//TODO work msg
+
+	fvs := prefix("/favor/" + k)
+	for _, fv := range fvs {
+		log.Println("favor : " + fv)
+		msgs := prefix("/work/" + fv + _ST_)
+		for _, m := range msgs {
+			log.Println("Work : [" + fv + "] status update [" + m + "]")
+			tmp = append(tmp, "Work "+fv+" is "+m)
+		}
+	}
 	res, _ := json.Marshal(tmp)
 	return string(res)
 }
@@ -339,6 +366,7 @@ func setTTL(k, v string, expire time.Duration) (err error) {
 	if len(k) == 0 || len(v) == 0 || expire == 0 {
 		return
 	}
+	log.Println("TTL " + k + ", " + v)
 	err = db.Update(func(txn *badger.Txn) error {
 		e := badger.NewEntry([]byte(k), []byte(v)).WithTTL(expire)
 		return txn.SetEntry(e)
