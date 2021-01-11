@@ -34,6 +34,7 @@ type KeccakState interface {
 type Body struct {
 	Timestamp int64  `json:"ts"`
 	Addr      string `json:"addr"`
+	//Text      string `json:"txt"`
 }
 
 var (
@@ -46,6 +47,8 @@ const (
 	DigestLength = 32
 	_FV_         = "_fv_"
 	_FL_         = "_fl_"
+	_PB_         = "_pb_"
+	_ST_         = "_st_"
 )
 
 func main() {
@@ -87,27 +90,33 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			res = FollowList(uri)
 		case "followed":
 			res = FollowedList(addr)
+		case "msg":
+			res = MsgList(addr)
 		default:
 			res = "Method not found"
 		}
 	case http.MethodPost:
 		if reqBody, err := ioutil.ReadAll(r.Body); err == nil {
 			var body Body
-			if err := json.Unmarshal(reqBody, &body); err != nil {
-				log.Printf("%v", err)
-				res = "Invalid json"
-				break
-			}
+			var to string
+			if method != "work" {
+				if len(reqBody) > 0 {
+					if err := json.Unmarshal(reqBody, &body); err != nil {
+						log.Printf("%v", err)
+						res = "Invalid json"
+						break
+					}
+				}
+				to = strings.ToLower(body.Addr)
+				if len(to) > 0 && !common.IsHexAddress(to) {
+					res = "Invalid addr format"
+					break
+				}
 
-			to := strings.ToLower(body.Addr)
-			if len(to) > 0 && !common.IsHexAddress(to) {
-				res = "Invalid addr format"
-				break
-			}
-
-			if !Verify(string(reqBody), addr, q.Get("sig"), body.Timestamp) {
-				res = "Invalid signature"
-				break
+				if !Verify(string(reqBody), addr, q.Get("sig"), body.Timestamp) {
+					res = "Invalid signature"
+					break
+				}
 			}
 
 			switch method {
@@ -121,6 +130,18 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				}
 			case "follow":
 				if err := Follow(uri, to); err != nil {
+					res = fmt.Sprintf("%v", err)
+				}
+			case "artist":
+				if err := Pub(uri, to); err != nil {
+					res = fmt.Sprintf("%v", err)
+				}
+			case "work":
+				status := "pending"
+				if len(q.Get("st")) > 0 {
+					status = q.Get("st")
+				}
+				if err := UpdateWork(uri, status); err != nil {
 					res = fmt.Sprintf("%v", err)
 				}
 			default:
@@ -186,11 +207,23 @@ func Follow(uri, to string) error {
 	return set(uri+_FL_+to, to)
 }
 
+func Pub(uri, to string) error {
+	return setTTL(uri+_PB_+to, to, 24*time.Hour)
+}
+
+func UpdateWork(uri, status string) error {
+	go setTTL(uri+_ST_, status, 24*time.Hour)
+	return nil
+}
+
 func UserDetails(k string) string {
 	return get(k)
 }
 
 func Verify(msg, addr, sig string, timestamp int64) bool {
+	if len(msg) == 0 || len(addr) == 0 || len(sig) == 0 {
+		return false
+	}
 	if time.Now().Unix()-int64(30) > timestamp {
 		//return errors.New("Signature expired")
 		//TODO
@@ -258,6 +291,34 @@ func FollowedList(k string) string {
 	return string(res)
 }
 
+func MsgList(k string) string {
+	fls := prefix("/follow/" + k)
+	var tmp []string
+	for _, fl := range fls {
+		log.Println("follow : " + fl)
+		msgs := prefix("/artist/" + fl)
+		for _, m := range msgs {
+			log.Println("artist : [" + fl + "] has published a new work [" + m + "]")
+			tmp = append(tmp, "Artist "+fl+" published work "+m)
+		}
+	}
+
+	//TODO delete after fetching
+	fvs := prefix("/favor/" + k)
+	for _, fv := range fvs {
+		log.Println("favor : " + fv)
+		msgs := prefix("/work/" + fv + _ST_)
+		for _, m := range msgs {
+			log.Println("Work : [" + fv + "] status update [" + m + "]")
+			tmp = append(tmp, "Work "+fv+" is "+m)
+		}
+	}
+
+	//TODO delete after fetching
+	res, _ := json.Marshal(tmp)
+	return string(res)
+}
+
 func FavoredList(k string) string {
 	k = _FV_ + k
 	favs := suffix(k)
@@ -301,6 +362,18 @@ func set(k, v string) (err error) {
 	}
 	err = db.Update(func(txn *badger.Txn) error {
 		return txn.Set([]byte(k), []byte(v))
+	})
+	return
+}
+
+func setTTL(k, v string, expire time.Duration) (err error) {
+	if len(k) == 0 || len(v) == 0 || expire == 0 {
+		return
+	}
+	log.Println("TTL " + k + ", " + v)
+	err = db.Update(func(txn *badger.Txn) error {
+		e := badger.NewEntry([]byte(k), []byte(v)).WithTTL(expire)
+		return txn.SetEntry(e)
 	})
 	return
 }
@@ -373,9 +446,6 @@ func suffix(suf string) (res []string) {
 			item := it.Item()
 			k := item.Key()
 			if strings.HasSuffix(string(k), suf) {
-				//vs := strings.Split(string(k), "_")
-				//favs := strings.Split(vs[0], "/")
-				//res = append(res, favs[len(favs)-1])
 				res = append(res, string(k))
 			}
 		}
@@ -387,10 +457,8 @@ func suffix(suf string) (res []string) {
 func sequence(key string) {
 	seq, _ := db.GetSequence([]byte(key), 1000)
 	defer seq.Release()
-	//for {
 	num, _ := seq.Next()
 	log.Printf("seq %v", num)
-	//}
 }
 
 func VerifySignature(pubkey, hash, signature []byte) bool {
@@ -465,7 +533,6 @@ func zeroBytes(bytes []byte) {
 func SignHex(msg string, pri string) (sig []byte, err error) {
 	k0, _ := HexToECDSA(pri)
 	msg0 := Keccak256([]byte(msg))
-	//fmt.Println("msg0 " + hexutil.Encode(msg0[:]))
 	return Sign(msg0, k0)
 }
 
