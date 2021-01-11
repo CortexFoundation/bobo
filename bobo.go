@@ -140,7 +140,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 					res = fmt.Sprintf("%v", err)
 				}
 			case "artist":
-				if err := PubWork(uri, to); err != nil {
+				if err := PublishWork(uri, to); err != nil {
 					res = fmt.Sprintf("%v", err)
 				}
 			case "work":
@@ -214,7 +214,7 @@ func Follow(uri, to string) error {
 	return set(uri+_FL_+to, to)
 }
 
-func PubWork(uri, to string) error {
+func PublishWork(uri, to string) error {
 	m := Msg{Timestamp: time.Now().Unix(), Text: to}
 	if res, err := json.Marshal(m); err == nil {
 		go setTTL(uri+_PB_+to, string(res), 24*time.Hour)
