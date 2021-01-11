@@ -133,7 +133,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 					res = fmt.Sprintf("%v", err)
 				}
 			case "artist":
-				if err := Pub(uri, to); err != nil {
+				if err := PubWork(uri, to); err != nil {
 					res = fmt.Sprintf("%v", err)
 				}
 			case "work":
@@ -207,8 +207,9 @@ func Follow(uri, to string) error {
 	return set(uri+_FL_+to, to)
 }
 
-func Pub(uri, to string) error {
-	return setTTL(uri+_PB_+to, to, 24*time.Hour)
+func PubWork(uri, to string) error {
+	go setTTL(uri+_PB_+to, to, 24*time.Hour)
+	return nil
 }
 
 func UpdateWork(uri, status string) error {
@@ -310,7 +311,7 @@ func MsgList(k string) string {
 		msgs := prefix("/work/" + fv + _ST_)
 		for _, m := range msgs {
 			log.Println("Work : [" + fv + "] status update [" + m + "]")
-			tmp = append(tmp, "Work "+fv+" is "+m)
+			tmp = append(tmp, "Work "+fv+" is changed")
 		}
 	}
 
