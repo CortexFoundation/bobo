@@ -68,6 +68,8 @@ do
         echo ""
 	curl -X POST -d "{\"ts\":1609310997}" ${domain}/work/0x564286362092d8e7936f0549571a803b203aaced?st=closed
         echo ""
+	curl -X POST -d "{\"ts\":1609310997}" ${domain}/work/0x564286362092d8e7936f0549571a803b203aaced?st=open
+        echo ""
 	curl -X GET ${domain}/msg/0x970e8128ab834e8eac17ab8e3812f010678cf791
 	echo ""
 	echo "Finish"

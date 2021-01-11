@@ -60,8 +60,9 @@ func main() {
 	if bg, err := badger.Open(badger.DefaultOptions(".badger")); err == nil {
 		defer bg.Close()
 		db = bg
-		http.HandleFunc("/", handler)
-		http.ListenAndServe("127.0.0.1:8080", nil)
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", handler)
+		http.ListenAndServe("127.0.0.1:8080", mux)
 	}
 }
 
