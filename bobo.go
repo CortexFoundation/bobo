@@ -37,6 +37,11 @@ type Body struct {
 	//Text      string `json:"txt"`
 }
 
+type Msg struct {
+	Timestamp int64  `json:"ts"`
+	Text      string `json:"text"`
+}
+
 var (
 	db            *badger.DB
 	secp256k1N, _ = new(big.Int).SetString("fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141", 16)
@@ -71,7 +76,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	addr, method := u[len(u)-1], u[len(u)-2]
+	addr, category := u[len(u)-1], u[len(u)-2]
 	if !common.IsHexAddress(addr) {
 		fmt.Fprintf(w, "Invalid infohash format")
 		return
@@ -79,7 +84,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	switch r.Method {
 	case http.MethodGet:
-		switch method {
+		switch category {
 		case "user":
 			res = UserDetails(uri)
 		case "favor":
@@ -99,7 +104,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		if reqBody, err := ioutil.ReadAll(r.Body); err == nil {
 			var body Body
 			var to string
-			if method != "work" {
+			if category != "work" {
 				if len(reqBody) > 0 {
 					if err := json.Unmarshal(reqBody, &body); err != nil {
 						log.Printf("%v", err)
@@ -107,6 +112,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 						break
 					}
 				}
+
 				to = strings.ToLower(body.Addr)
 				if len(to) > 0 && !common.IsHexAddress(to) {
 					res = "Invalid addr format"
@@ -119,7 +125,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			switch method {
+			switch category {
 			case "user":
 				if err := UserCreate(uri, string(reqBody)); err != nil {
 					res = fmt.Sprintf("%v", err)
@@ -137,7 +143,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 					res = fmt.Sprintf("%v", err)
 				}
 			case "work":
-				status := "pending"
+				status := "changed"
 				if len(q.Get("st")) > 0 {
 					status = q.Get("st")
 				}
@@ -168,7 +174,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 
-			switch method {
+			switch category {
 			case "favor":
 				if err := Unfavor(uri, to); err != nil {
 					res = fmt.Sprintf("%v", err)
@@ -208,12 +214,18 @@ func Follow(uri, to string) error {
 }
 
 func PubWork(uri, to string) error {
-	go setTTL(uri+_PB_+to, to, 24*time.Hour)
+	m := Msg{Timestamp: time.Now().Unix(), Text: to}
+	if res, err := json.Marshal(m); err == nil {
+		go setTTL(uri+_PB_+to, string(res), 24*time.Hour)
+	}
 	return nil
 }
 
 func UpdateWork(uri, status string) error {
-	go setTTL(uri+_ST_, status, 24*time.Hour)
+	m := Msg{Timestamp: time.Now().Unix(), Text: status}
+	if res, err := json.Marshal(m); err == nil {
+		go setTTL(uri+_ST_+status, string(res), 24*time.Hour)
+	}
 	return nil
 }
 
@@ -222,9 +234,10 @@ func UserDetails(k string) string {
 }
 
 func Verify(msg, addr, sig string, timestamp int64) bool {
-	if len(msg) == 0 || len(addr) == 0 || len(sig) == 0 {
+	if len(msg) == 0 || len(addr) == 0 || len(sig) == 0 || timestamp == 0 {
 		return false
 	}
+
 	if time.Now().Unix()-int64(30) > timestamp {
 		//return errors.New("Signature expired")
 		//TODO
@@ -294,28 +307,34 @@ func FollowedList(k string) string {
 
 func MsgList(k string) string {
 	fls := prefix("/follow/" + k)
-	var tmp []string
+	var tmp []Msg
 	for _, fl := range fls {
 		log.Println("follow : " + fl)
 		msgs := prefix("/artist/" + fl)
 		for _, m := range msgs {
 			log.Println("artist : [" + fl + "] has published a new work [" + m + "]")
-			tmp = append(tmp, "Artist "+fl+" published work "+m)
+			var mm Msg
+			if err := json.Unmarshal([]byte(m), &mm); err == nil {
+				mm.Text = "Artist " + fl + " published " + mm.Text
+				tmp = append(tmp, mm)
+			}
 		}
 	}
 
-	//TODO delete after fetching
 	fvs := prefix("/favor/" + k)
 	for _, fv := range fvs {
 		log.Println("favor : " + fv)
 		msgs := prefix("/work/" + fv + _ST_)
 		for _, m := range msgs {
 			log.Println("Work : [" + fv + "] status update [" + m + "]")
-			tmp = append(tmp, "Work "+fv+" is changed")
+			var mm Msg
+			if err := json.Unmarshal([]byte(m), &mm); err == nil {
+				mm.Text = "Work " + fv + " is " + mm.Text
+				tmp = append(tmp, mm)
+			}
 		}
 	}
 
-	//TODO delete after fetching
 	res, _ := json.Marshal(tmp)
 	return string(res)
 }
