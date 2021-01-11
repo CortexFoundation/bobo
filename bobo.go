@@ -279,17 +279,21 @@ func Verify(msg, addr, sig string, timestamp int64) bool {
 	return true
 }
 
-func FavorList(k string) string {
-	res, _ := json.Marshal(prefix(k))
-	return string(res)
+func FavorList(k string) (response string) {
+	if res, err := json.Marshal(prefix(k)); err == nil {
+		response = string(res)
+	}
+	return
 }
 
-func FollowList(k string) string {
-	res, _ := json.Marshal(prefix(k))
-	return string(res)
+func FollowList(k string) (response string) {
+	if res, err := json.Marshal(prefix(k)); err == nil {
+		response = string(res)
+	}
+	return
 }
 
-func FollowedList(k string) string {
+func FollowedList(k string) (response string) {
 	k = _FL_ + k
 	followers := suffix(k)
 
@@ -302,15 +306,17 @@ func FollowedList(k string) string {
 		}
 
 	}
-	res, _ := json.Marshal(tmp)
-	return string(res)
+	if res, err := json.Marshal(tmp); err == nil {
+		response = string(res)
+	}
+	return
 }
 
-func MsgList(k string) string {
-	fls := prefix("/follow/" + k)
+func MsgList(k string) (response string) {
 	var tmp []Msg
+
+	fls := prefix("/follow/" + k)
 	for _, fl := range fls {
-		log.Println("follow : " + fl)
 		msgs := prefix("/artist/" + fl)
 		for _, m := range msgs {
 			log.Println("artist : [" + fl + "] has published a new work [" + m + "]")
@@ -324,7 +330,6 @@ func MsgList(k string) string {
 
 	fvs := prefix("/favor/" + k)
 	for _, fv := range fvs {
-		log.Println("favor : " + fv)
 		msgs := prefix("/work/" + fv + _ST_)
 		for _, m := range msgs {
 			log.Println("Work : [" + fv + "] status update [" + m + "]")
@@ -336,11 +341,14 @@ func MsgList(k string) string {
 		}
 	}
 
-	res, _ := json.Marshal(tmp)
-	return string(res)
+	if res, err := json.Marshal(tmp); err == nil {
+		response = string(res)
+	}
+
+	return
 }
 
-func FavoredList(k string) string {
+func FavoredList(k string) (response string) {
 	k = _FV_ + k
 	favs := suffix(k)
 
@@ -352,8 +360,10 @@ func FavoredList(k string) string {
 			tmp = append(tmp, fs[len(fs)-1])
 		}
 	}
-	res, _ := json.Marshal(tmp)
-	return string(res)
+	if res, err := json.Marshal(tmp); err == nil {
+		response = string(res)
+	}
+	return
 }
 
 func get(k string) (val string) {
