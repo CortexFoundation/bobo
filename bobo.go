@@ -1,11 +1,7 @@
 package main
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"hash"
 	"io/ioutil"
@@ -17,11 +13,8 @@ import (
 
 	"github.com/CortexFoundation/CortexTheseus/common"
 	"github.com/CortexFoundation/CortexTheseus/common/hexutil"
-	"github.com/CortexFoundation/CortexTheseus/common/math"
 	"github.com/CortexFoundation/CortexTheseus/crypto"
 	"github.com/CortexFoundation/CortexTheseus/crypto/secp256k1"
-
-	"golang.org/x/crypto/sha3"
 
 	badger "github.com/dgraph-io/badger/v2"
 )
@@ -119,8 +112,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 					res = "Invalid addr format"
 					break
 				}
-
+				log.Println(string(reqBody))
 				if !Verify(string(reqBody), addr, q.Get("sig"), body.Timestamp) {
+					//if !Verify(string(reqBody), addr, q.Get("sig"), 1) {
 					res = "Invalid signature"
 					break
 				}
@@ -203,6 +197,7 @@ func Unfollow(uri, to string) error {
 }
 
 func UserCreate(uri, v string) error {
+	log.Println("user: " + v)
 	return set(uri, v)
 }
 
@@ -236,46 +231,58 @@ func UserDetails(k string) string {
 
 func Verify(msg, addr, sig string, timestamp int64) bool {
 	if len(msg) == 0 || len(addr) == 0 || len(sig) == 0 || timestamp == 0 {
+		log.Println("params failed msg:" + msg + ", addr:" + addr + ", sig:" + sig)
 		return false
 	}
 
 	if time.Now().Unix()-int64(30) > timestamp {
 		//return errors.New("Signature expired")
 		//TODO
-		//return false
+		return false
 	}
 
-	if time.Now().Unix()+int64(15) < timestamp {
+	if time.Now().Unix()+int64(30) < timestamp {
 		//return errors.New("Signature disallowed future")
 		//TODO
-		//return false
+		return false
 	}
 
-	sig_, _ := SignHex(msg, testpri)
-	log.Printf("[signature] : %s", hexutil.Encode(sig_[:]))
-
-	m := Keccak256([]byte(msg))
+	sig_, _ := SignData(msg, testpri)
+	log.Printf("[signature] : want:%s, have:%s", hexutil.Encode(sig_[:]), sig)
+	//m := Keccak256([]byte(msg))
+	//m, _ := SignHash([]byte(msg))
 	s := hexutil.MustDecode(sig)
+	//s, err := hex.DecodeString(sig)
+	//if err != nil {
+	//	return false
+	//}
 
-	if len(m) == 0 || len(s) == 0 {
+	if len(s) == 0 {
+		log.Println("Signature failed m")
 		return false
 	}
-
-	recoveredPub, err := Ecrecover(m, s)
+	//recoveredPubkey, err := crypto.SigToPub(m, s)
+	//if err != nil || recoveredPubkey == nil {
+	//	log.Printf("Signature verification failed: %v", err)
+	//	return false
+	//}
+	//recoveredAddr := crypto.PubkeyToAddress(*recoveredPubkey)
+	recoveredAddr, err := EcRecover([]byte(msg), s)
 	if err != nil {
+		log.Println(err)
 		return false
 	}
 
-	pubKey, _ := UnmarshalPubkey(recoveredPub)
-	recoveredAddr := PubkeyToAddress(*pubKey)
+	//pubKey, _ := UnmarshalPubkey(recoveredPub)
+	//recoveredAddr := PubkeyToAddress(*pubKey)
 	if common.HexToAddress(addr) != recoveredAddr {
 		log.Printf("Address mismatch: want: %v have: %v\n", addr, recoveredAddr.Hex())
 		return false
 	}
 
-	if !VerifySignature(recoveredPub, m, s[:len(s)-1]) {
-		return false
-	}
+	//if !VerifySignature(recoveredPub, m, s[:len(s)-1]) {
+	//	return false
+	//}
 	return true
 }
 
@@ -501,7 +508,7 @@ func EcRecover(data, sig hexutil.Bytes) (common.Address, error) {
 		return common.Address{}, fmt.Errorf("signature must be 65 bytes long")
 	}
 	if sig[64] != 27 && sig[64] != 28 {
-		return common.Address{}, fmt.Errorf("invalid Cortex signature (V is not 27 or 28)")
+		return common.Address{}, fmt.Errorf("invalid Cortex signature (V is not 27 or 28) %v", sig[64])
 	}
 	sig[64] -= 27 // Transform yellow paper V from 27/28 to 0/1
 	hash, _ := SignHash(data)
@@ -513,11 +520,11 @@ func EcRecover(data, sig hexutil.Bytes) (common.Address, error) {
 }
 
 func SignHash(data []byte) ([]byte, string) {
-	msg := fmt.Sprintf("\x19Cortex Signed Message:\n%d%s", len(data), data)
+	msg := fmt.Sprintf("\x19Ethereum Signed Message:\n%d%s", len(data), data)
 	return crypto.Keccak256([]byte(msg)), msg
 }
 
-func PubkeyToAddress(p ecdsa.PublicKey) common.Address {
+/*func PubkeyToAddress(p ecdsa.PublicKey) common.Address {
 	pubBytes := FromECDSAPub(&p)
 	return common.BytesToAddress(Keccak256(pubBytes[1:])[12:])
 }
@@ -566,8 +573,16 @@ func SignHex(msg string, pri string) (sig []byte, err error) {
 	msg0 := Keccak256([]byte(msg))
 	return Sign(msg0, k0)
 }
+*/
+func SignData(msg string, pri string) (sig []byte, err error) {
+	k0, _ := crypto.HexToECDSA(pri)
+	msg0, _ := SignHash([]byte(msg)) //Keccak256([]byte(msg))
+	sig, err = crypto.Sign(msg0, k0)
+	sig[64] += 27
+	return
+}
 
-func Sign(hash []byte, prv *ecdsa.PrivateKey) (sig []byte, err error) {
+/*func Sign(hash []byte, prv *ecdsa.PrivateKey) (sig []byte, err error) {
 	if len(hash) != DigestLength {
 		return nil, fmt.Errorf("hash is required to be exactly 32 bytes (%d)", len(hash))
 	}
@@ -612,4 +627,4 @@ func toECDSA(d []byte, strict bool) (*ecdsa.PrivateKey, error) {
 		return nil, errors.New("invalid private key")
 	}
 	return priv, nil
-}
+}*/
