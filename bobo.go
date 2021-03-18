@@ -1,11 +1,7 @@
 package main
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"hash"
 	"io/ioutil"
@@ -17,11 +13,8 @@ import (
 
 	"github.com/CortexFoundation/CortexTheseus/common"
 	"github.com/CortexFoundation/CortexTheseus/common/hexutil"
-	"github.com/CortexFoundation/CortexTheseus/common/math"
 	"github.com/CortexFoundation/CortexTheseus/crypto"
 	"github.com/CortexFoundation/CortexTheseus/crypto/secp256k1"
-
-	"golang.org/x/crypto/sha3"
 
 	badger "github.com/dgraph-io/badger/v2"
 )
@@ -35,6 +28,11 @@ type Body struct {
 	Timestamp int64  `json:"ts"`
 	Addr      string `json:"addr"`
 	//Text      string `json:"txt"`
+}
+
+type Msg struct {
+	Timestamp int64  `json:"ts"`
+	Text      string `json:"text"`
 }
 
 var (
@@ -55,8 +53,9 @@ func main() {
 	if bg, err := badger.Open(badger.DefaultOptions(".badger")); err == nil {
 		defer bg.Close()
 		db = bg
-		http.HandleFunc("/", handler)
-		http.ListenAndServe("127.0.0.1:8080", nil)
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", handler)
+		http.ListenAndServe("127.0.0.1:8080", mux)
 	}
 }
 
@@ -71,7 +70,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	addr, method := u[len(u)-1], u[len(u)-2]
+	addr, category := u[len(u)-1], u[len(u)-2]
 	if !common.IsHexAddress(addr) {
 		fmt.Fprintf(w, "Invalid infohash format")
 		return
@@ -79,7 +78,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	switch r.Method {
 	case http.MethodGet:
-		switch method {
+		switch category {
 		case "user":
 			res = UserDetails(uri)
 		case "favor":
@@ -99,7 +98,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		if reqBody, err := ioutil.ReadAll(r.Body); err == nil {
 			var body Body
 			var to string
-			if method != "work" {
+			if category != "work" {
 				if len(reqBody) > 0 {
 					if err := json.Unmarshal(reqBody, &body); err != nil {
 						log.Printf("%v", err)
@@ -107,19 +106,21 @@ func handler(w http.ResponseWriter, r *http.Request) {
 						break
 					}
 				}
+
 				to = strings.ToLower(body.Addr)
 				if len(to) > 0 && !common.IsHexAddress(to) {
 					res = "Invalid addr format"
 					break
 				}
-
+				log.Println(string(reqBody))
 				if !Verify(string(reqBody), addr, q.Get("sig"), body.Timestamp) {
+					//if !Verify(string(reqBody), addr, q.Get("sig"), 1) {
 					res = "Invalid signature"
 					break
 				}
 			}
 
-			switch method {
+			switch category {
 			case "user":
 				if err := UserCreate(uri, string(reqBody)); err != nil {
 					res = fmt.Sprintf("%v", err)
@@ -133,11 +134,11 @@ func handler(w http.ResponseWriter, r *http.Request) {
 					res = fmt.Sprintf("%v", err)
 				}
 			case "artist":
-				if err := Pub(uri, to); err != nil {
+				if err := PublishWork(uri, to); err != nil {
 					res = fmt.Sprintf("%v", err)
 				}
 			case "work":
-				status := "pending"
+				status := "changed"
 				if len(q.Get("st")) > 0 {
 					status = q.Get("st")
 				}
@@ -168,7 +169,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 
-			switch method {
+			switch category {
 			case "favor":
 				if err := Unfavor(uri, to); err != nil {
 					res = fmt.Sprintf("%v", err)
@@ -196,6 +197,7 @@ func Unfollow(uri, to string) error {
 }
 
 func UserCreate(uri, v string) error {
+	log.Println("user: " + v)
 	return set(uri, v)
 }
 
@@ -207,12 +209,19 @@ func Follow(uri, to string) error {
 	return set(uri+_FL_+to, to)
 }
 
-func Pub(uri, to string) error {
-	return setTTL(uri+_PB_+to, to, 24*time.Hour)
+func PublishWork(uri, to string) error {
+	m := Msg{Timestamp: time.Now().Unix(), Text: to}
+	if res, err := json.Marshal(m); err == nil {
+		go setTTL(uri+_PB_+to, string(res), 24*time.Hour)
+	}
+	return nil
 }
 
 func UpdateWork(uri, status string) error {
-	go setTTL(uri+_ST_, status, 24*time.Hour)
+	m := Msg{Timestamp: time.Now().Unix(), Text: status}
+	if res, err := json.Marshal(m); err == nil {
+		go setTTL(uri+_ST_+status, string(res), 24*time.Hour)
+	}
 	return nil
 }
 
@@ -221,60 +230,77 @@ func UserDetails(k string) string {
 }
 
 func Verify(msg, addr, sig string, timestamp int64) bool {
-	if len(msg) == 0 || len(addr) == 0 || len(sig) == 0 {
+	if len(msg) == 0 || len(addr) == 0 || len(sig) == 0 || timestamp == 0 {
+		log.Println("params failed msg:" + msg + ", addr:" + addr + ", sig:" + sig)
 		return false
 	}
+
 	if time.Now().Unix()-int64(30) > timestamp {
 		//return errors.New("Signature expired")
 		//TODO
-		//return false
+		return false
 	}
 
-	if time.Now().Unix()+int64(15) < timestamp {
+	if time.Now().Unix()+int64(30) < timestamp {
 		//return errors.New("Signature disallowed future")
 		//TODO
-		//return false
+		return false
 	}
 
-	sig_, _ := SignHex(msg, testpri)
-	log.Printf("[signature] : %s", hexutil.Encode(sig_[:]))
-
-	m := Keccak256([]byte(msg))
+	sig_, _ := SignData(msg, testpri)
+	log.Printf("[signature] : want:%s, have:%s", hexutil.Encode(sig_[:]), sig)
+	//m := Keccak256([]byte(msg))
+	//m, _ := SignHash([]byte(msg))
 	s := hexutil.MustDecode(sig)
+	//s, err := hex.DecodeString(sig)
+	//if err != nil {
+	//	return false
+	//}
 
-	if len(m) == 0 || len(s) == 0 {
+	if len(s) == 0 {
+		log.Println("Signature failed m")
 		return false
 	}
-
-	recoveredPub, err := Ecrecover(m, s)
+	//recoveredPubkey, err := crypto.SigToPub(m, s)
+	//if err != nil || recoveredPubkey == nil {
+	//	log.Printf("Signature verification failed: %v", err)
+	//	return false
+	//}
+	//recoveredAddr := crypto.PubkeyToAddress(*recoveredPubkey)
+	recoveredAddr, err := EcRecover([]byte(msg), s)
 	if err != nil {
+		log.Println(err)
 		return false
 	}
 
-	pubKey, _ := UnmarshalPubkey(recoveredPub)
-	recoveredAddr := PubkeyToAddress(*pubKey)
+	//pubKey, _ := UnmarshalPubkey(recoveredPub)
+	//recoveredAddr := PubkeyToAddress(*pubKey)
 	if common.HexToAddress(addr) != recoveredAddr {
 		log.Printf("Address mismatch: want: %v have: %v\n", addr, recoveredAddr.Hex())
 		return false
 	}
 
-	if !VerifySignature(recoveredPub, m, s[:len(s)-1]) {
-		return false
-	}
+	//if !VerifySignature(recoveredPub, m, s[:len(s)-1]) {
+	//	return false
+	//}
 	return true
 }
 
-func FavorList(k string) string {
-	res, _ := json.Marshal(prefix(k))
-	return string(res)
+func FavorList(k string) (response string) {
+	if res, err := json.Marshal(prefix(k)); err == nil {
+		response = string(res)
+	}
+	return
 }
 
-func FollowList(k string) string {
-	res, _ := json.Marshal(prefix(k))
-	return string(res)
+func FollowList(k string) (response string) {
+	if res, err := json.Marshal(prefix(k)); err == nil {
+		response = string(res)
+	}
+	return
 }
 
-func FollowedList(k string) string {
+func FollowedList(k string) (response string) {
 	k = _FL_ + k
 	followers := suffix(k)
 
@@ -287,39 +313,49 @@ func FollowedList(k string) string {
 		}
 
 	}
-	res, _ := json.Marshal(tmp)
-	return string(res)
+	if res, err := json.Marshal(tmp); err == nil {
+		response = string(res)
+	}
+	return
 }
 
-func MsgList(k string) string {
+func MsgList(k string) (response string) {
+	var tmp []Msg
+
 	fls := prefix("/follow/" + k)
-	var tmp []string
 	for _, fl := range fls {
-		log.Println("follow : " + fl)
 		msgs := prefix("/artist/" + fl)
 		for _, m := range msgs {
 			log.Println("artist : [" + fl + "] has published a new work [" + m + "]")
-			tmp = append(tmp, "Artist "+fl+" published work "+m)
+			var mm Msg
+			if err := json.Unmarshal([]byte(m), &mm); err == nil {
+				mm.Text = "Artist " + fl + " published " + mm.Text
+				tmp = append(tmp, mm)
+			}
 		}
 	}
 
-	//TODO delete after fetching
 	fvs := prefix("/favor/" + k)
 	for _, fv := range fvs {
-		log.Println("favor : " + fv)
 		msgs := prefix("/work/" + fv + _ST_)
 		for _, m := range msgs {
 			log.Println("Work : [" + fv + "] status update [" + m + "]")
-			tmp = append(tmp, "Work "+fv+" is "+m)
+			var mm Msg
+			if err := json.Unmarshal([]byte(m), &mm); err == nil {
+				mm.Text = "Work " + fv + " is " + mm.Text
+				tmp = append(tmp, mm)
+			}
 		}
 	}
 
-	//TODO delete after fetching
-	res, _ := json.Marshal(tmp)
-	return string(res)
+	if res, err := json.Marshal(tmp); err == nil {
+		response = string(res)
+	}
+
+	return
 }
 
-func FavoredList(k string) string {
+func FavoredList(k string) (response string) {
 	k = _FV_ + k
 	favs := suffix(k)
 
@@ -331,8 +367,10 @@ func FavoredList(k string) string {
 			tmp = append(tmp, fs[len(fs)-1])
 		}
 	}
-	res, _ := json.Marshal(tmp)
-	return string(res)
+	if res, err := json.Marshal(tmp); err == nil {
+		response = string(res)
+	}
+	return
 }
 
 func get(k string) (val string) {
@@ -470,7 +508,7 @@ func EcRecover(data, sig hexutil.Bytes) (common.Address, error) {
 		return common.Address{}, fmt.Errorf("signature must be 65 bytes long")
 	}
 	if sig[64] != 27 && sig[64] != 28 {
-		return common.Address{}, fmt.Errorf("invalid Cortex signature (V is not 27 or 28)")
+		return common.Address{}, fmt.Errorf("invalid Cortex signature (V is not 27 or 28) %v", sig[64])
 	}
 	sig[64] -= 27 // Transform yellow paper V from 27/28 to 0/1
 	hash, _ := SignHash(data)
@@ -482,11 +520,11 @@ func EcRecover(data, sig hexutil.Bytes) (common.Address, error) {
 }
 
 func SignHash(data []byte) ([]byte, string) {
-	msg := fmt.Sprintf("\x19Cortex Signed Message:\n%d%s", len(data), data)
+	msg := fmt.Sprintf("\x19Ethereum Signed Message:\n%d%s", len(data), data)
 	return crypto.Keccak256([]byte(msg)), msg
 }
 
-func PubkeyToAddress(p ecdsa.PublicKey) common.Address {
+/*func PubkeyToAddress(p ecdsa.PublicKey) common.Address {
 	pubBytes := FromECDSAPub(&p)
 	return common.BytesToAddress(Keccak256(pubBytes[1:])[12:])
 }
@@ -535,8 +573,16 @@ func SignHex(msg string, pri string) (sig []byte, err error) {
 	msg0 := Keccak256([]byte(msg))
 	return Sign(msg0, k0)
 }
+*/
+func SignData(msg string, pri string) (sig []byte, err error) {
+	k0, _ := crypto.HexToECDSA(pri)
+	msg0, _ := SignHash([]byte(msg)) //Keccak256([]byte(msg))
+	sig, err = crypto.Sign(msg0, k0)
+	sig[64] += 27
+	return
+}
 
-func Sign(hash []byte, prv *ecdsa.PrivateKey) (sig []byte, err error) {
+/*func Sign(hash []byte, prv *ecdsa.PrivateKey) (sig []byte, err error) {
 	if len(hash) != DigestLength {
 		return nil, fmt.Errorf("hash is required to be exactly 32 bytes (%d)", len(hash))
 	}
@@ -581,4 +627,4 @@ func toECDSA(d []byte, strict bool) (*ecdsa.PrivateKey, error) {
 		return nil, errors.New("invalid private key")
 	}
 	return priv, nil
-}
+}*/
